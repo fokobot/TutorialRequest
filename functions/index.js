@@ -41,7 +41,7 @@ exports.addRequest = functions.https.onCall((data, context) => {
 })
 
 // upvote callable function
-exports.upvote = functions.https.onCall((data, context) => {
+exports.upvote = functions.https.onCall(async (data, context) => {
     //check auth state
     if (!context.auth) {
         throw new functions.https.HttpsError(
@@ -53,22 +53,39 @@ exports.upvote = functions.https.onCall((data, context) => {
     const user = admin.firestore().collection('users').doc(context.auth.uid);
     const request = admin.firestore().collection('requests').doc(data.id);
 
-    return user.get().then(doc => {
-        //check user hasn't already upvoted the request
-        if(doc.data().upvotedOn.includes(data.id)){
-            throw new functions.https.HttpsError(
-                'failed-precondition',
-                'You can only upvote something once'
-            );
-        }
-        //update user array
-        return user.update({
-            upvotedOn: [...doc.data().upvoteOn, data.id]
-        }).then(() => {
-            //update votes in the request
-            return request.update({
-                upvotes: admin.firestore.FieldValue.increment(1)
-            });
-        });
+    const doc = await user.get();
+    //check user hasn't already upvoted the request
+    if (doc.data().upvotedOn.includes(data.id)) {
+        throw new functions.https.HttpsError(
+            'failed-precondition',
+            'You can only upvote something once'
+        );
+    }
+    //update user array
+    await user.update({
+        upvotedOn: [...doc.data().upvotedOn, data.id]
+    })
+    //update votes in the request
+    return request.update({
+        upvotes: admin.firestore.FieldValue.increment(1)
     });
 });
+
+//firestore trigger for tracking activity
+exports.logActivities = functions.firestore.document('/{collection}/{id}')
+    .onCreate((snap, context) => {
+        console.log(snap.data());
+        const collection = context.params.collection;
+        const id = context.params.id;
+
+        const activities = admin.firestore().collection('activities');
+
+        if(collection === 'requests'){
+            return activities.add({text: 'a new tutorial request was added'});
+        }
+        if(collection === 'users'){
+            return activities.add({text: 'a new user signed up'});
+        }
+
+        return null;
+    })
